@@ -69,6 +69,20 @@ jobs:
           import os, urllib.request, urllib.parse
           base = os.environ['PUBLISH_URL']
           key = os.environ['PUBLISH_KEY']
+          # Freshness guard: if KV already holds a strictly newer snapshot, skip publishing
+          try:
+              vreq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:version.json'),
+                                            headers={'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'})
+              with urllib.request.urlopen(vreq, timeout=30) as r:
+                  import json as _j
+                  kv_epoch = _j.loads(r.read().decode('utf-8')).get('epoch', 0)
+          except urllib.error.HTTPError as e:
+              kv_epoch = 0 if e.code == 404 else (_ for _ in ()).throw(e)
+          import json as _j2
+          local_epoch = _j2.load(open('version.json', encoding='utf-8')).get('epoch', 0)
+          if kv_epoch > local_epoch:
+              print('SKIP publish: KV holds newer snapshot')
+              raise SystemExit(0)
           uploads = [('index.html', 'site:index.html'), ('version.json', 'site:version.json')]
           for name in ['bio_hot.json','news_latest.json','cnn_snapshot.json',
                        'clinical_trials_cache.json','biotech_breakthroughs_cache.json',
