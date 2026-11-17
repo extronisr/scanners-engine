@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+state-*.json
+cache-*.json
+biotech_*.json
+market_scanner_universe.json
+accuracy_stats.json
+news_latest.json
+index.html
+version.json
