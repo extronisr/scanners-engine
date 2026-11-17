@@ -34,7 +34,7 @@ jobs:
           PUBLISH_URL: ${{ secrets.PUBLISH_URL }}
         run: |
           python3 - <<'PYEOF'
-          import os, urllib.request, urllib.parse
+          import os, json, urllib.request, urllib.parse
           base = os.environ['PUBLISH_URL']
           key = os.environ['PUBLISH_KEY']
           caches = ['bio_hot.json','news_latest.json','cnn_snapshot.json',
@@ -42,9 +42,30 @@ jobs:
                     'sp500_tickers_cache.json','sp500_names_cache.json','recovery_history.json',
                     'biotech_config.json','biotech_universe.json','biotech_catalysts.json',
                     'biotech_trials.json','market_scanner_universe.json','accuracy_stats.json']
+          H = {'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'}
+          # Coherent restore: one bundle GET (single atomic snapshot), fallback to per-key GETs
+          restored = set()
+          try:
+              req = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:bundle'), headers=H)
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  bundle = json.loads(r.read().decode('utf-8'))
+              for name in caches:
+                  k = 'cache:' + name
+                  if k in bundle.get('files', {}):
+                      with open(name, 'w', encoding='utf-8') as f:
+                          json.dump(bundle['files'][k], f, ensure_ascii=False)
+                      restored.add(name)
+              if restored:
+                  print('cache restore: bundle epoch', bundle.get('epoch'), '-', len(restored), 'files, coherent snapshot')
+          except urllib.error.HTTPError as e:
+              if e.code != 404:
+                  raise
+              print('cache restore: no bundle yet, falling back to per-key GETs')
           for name in caches:
+              if name in restored:
+                  continue
               url = base + '?key=' + urllib.parse.quote('cache:' + name)
-              req = urllib.request.Request(url, headers={'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'})
+              req = urllib.request.Request(url, headers=H)
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       data = r.read()
@@ -66,20 +87,22 @@ jobs:
           PUBLISH_URL: ${{ secrets.PUBLISH_URL }}
         run: |
           python3 - <<'PYEOF'
-          import os, urllib.request, urllib.parse
+          import os, json, urllib.request, urllib.parse
           base = os.environ['PUBLISH_URL']
           key = os.environ['PUBLISH_KEY']
+          H = {'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'}
           # Freshness guard: if KV already holds a strictly newer snapshot, skip publishing
           try:
-              vreq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:version.json'),
-                                            headers={'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'})
+              vreq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:version.json'), headers=H)
               with urllib.request.urlopen(vreq, timeout=30) as r:
-                  import json as _j
-                  kv_epoch = _j.loads(r.read().decode('utf-8')).get('epoch', 0)
+                  kv_epoch = json.loads(r.read().decode('utf-8')).get('epoch', 0)
           except urllib.error.HTTPError as e:
-              kv_epoch = 0 if e.code == 404 else (_ for _ in ()).throw(e)
-          import json as _j2
-          local_epoch = _j2.load(open('version.json', encoding='utf-8')).get('epoch', 0)
+              if e.code == 404:
+                  kv_epoch = 0
+              else:
+                  raise
+          local_version = json.load(open('version.json', encoding='utf-8'))
+          local_epoch = local_version.get('epoch', 0)
           if kv_epoch > local_epoch:
               print('SKIP publish: KV holds newer snapshot')
               raise SystemExit(0)
@@ -91,16 +114,23 @@ jobs:
                        'biotech_trials.json','market_scanner_universe.json','accuracy_stats.json']:
               if os.path.exists(name):
                   uploads.append((name, 'cache:' + name))
+          files = {}
           for path, k in uploads:
-              with open(path, 'rb') as f:
-                  data = f.read()
+              if k.endswith('.json'):
+                  files[k] = json.load(open(path, encoding='utf-8'))
+              else:
+                  files[k] = open(path, encoding='utf-8').read()
+          # Atomic publication: ONE bundle PUT swaps the whole snapshot coherently
+          bundle = json.dumps({'epoch': local_epoch, 'files': files}, ensure_ascii=False, separators=(',', ':'))
+          def put(k, body):
               url = base + '?key=' + urllib.parse.quote(k)
-              req = urllib.request.Request(url, data=data, method='POST',
-                                           headers={'x-publish-key': key,
-                                                    'Content-Type': 'application/octet-stream',
-                                                    'User-Agent': 'scanner-refresh/1.0'})
-              with urllib.request.urlopen(req, timeout=60) as r:
+              req = urllib.request.Request(url, data=body.encode('utf-8'), method='POST',
+                                           headers=dict(H, **{'Content-Type': 'application/octet-stream'}))
+              with urllib.request.urlopen(req, timeout=120) as r:
                   if r.status != 200:
                       raise SystemExit('publish failed for ' + k + ': HTTP ' + str(r.status))
-              print('published:', k, len(data), 'bytes')
+          put('site:bundle', bundle)
+          # compat pointer for freshness probes and the guard (bundle is authoritative)
+          put('site:version.json', json.dumps(local_version, ensure_ascii=False))
+          print('published: site:bundle', len(bundle), 'bytes,', len(files), 'files, epoch', local_epoch)
           PYEOF
