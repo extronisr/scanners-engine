@@ -106,6 +106,14 @@ jobs:
           if kv_epoch > local_epoch:
               print('SKIP publish: KV holds newer snapshot')
               raise SystemExit(0)
+          # Backfill rule (parallel phase): 500scanners is the primary writer.
+          # The engine publishes only when the primary is stale (>10 min old),
+          # which makes simultaneous dual-writer collisions practically impossible
+          # while keeping the engine proven as a working failover path.
+          import time as _t
+          if kv_epoch and (_t.time() - kv_epoch) < 600:
+              print('SKIP publish: primary snapshot fresh (engine is backfill in parallel phase)')
+              raise SystemExit(0)
           uploads = [('index.html', 'site:index.html'), ('version.json', 'site:version.json')]
           for name in ['bio_hot.json','news_latest.json','cnn_snapshot.json',
                        'clinical_trials_cache.json','biotech_breakthroughs_cache.json',
