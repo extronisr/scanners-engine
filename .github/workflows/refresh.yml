@@ -6,7 +6,7 @@
 name: Refresh scanners
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '7-59/15 * * * *'  # phase-offset from 500scanners so the two parallel-phase writers never overlap
   workflow_dispatch:
     inputs:
       force_news:
@@ -91,10 +91,10 @@ jobs:
           base = os.environ['PUBLISH_URL']
           key = os.environ['PUBLISH_KEY']
           H = {'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'}
-          # Freshness guard: if KV already holds a strictly newer snapshot, skip publishing
+          # Freshness guard: read the AUTHORITATIVE bundle's epoch; skip if KV holds newer
           try:
-              vreq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:version.json'), headers=H)
-              with urllib.request.urlopen(vreq, timeout=30) as r:
+              vreq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:bundle'), headers=H)
+              with urllib.request.urlopen(vreq, timeout=60) as r:
                   kv_epoch = json.loads(r.read().decode('utf-8')).get('epoch', 0)
           except urllib.error.HTTPError as e:
               if e.code == 404:
@@ -130,7 +130,15 @@ jobs:
                   if r.status != 200:
                       raise SystemExit('publish failed for ' + k + ': HTTP ' + str(r.status))
           put('site:bundle', bundle)
-          # compat pointer for freshness probes and the guard (bundle is authoritative)
-          put('site:version.json', json.dumps(local_version, ensure_ascii=False))
-          print('published: site:bundle', len(bundle), 'bytes,', len(files), 'files, epoch', local_epoch)
+          # post-write convergence check: if a concurrent newer writer won, report it
+          try:
+              creq = urllib.request.Request(base + '?key=' + urllib.parse.quote('site:bundle'), headers=H)
+              with urllib.request.urlopen(creq, timeout=60) as r:
+                  stored_epoch = json.loads(r.read().decode('utf-8')).get('epoch', 0)
+              if stored_epoch != local_epoch:
+                  print('NOTE: stored bundle epoch', stored_epoch, '!= own', local_epoch, '- concurrent writer; newer snapshot wins by guard on next run')
+              else:
+                  print('published: site:bundle', len(bundle), 'bytes,', len(files), 'files, epoch', local_epoch)
+          except Exception as e:
+              print('post-write check failed (non-fatal):', type(e).__name__)
           PYEOF
