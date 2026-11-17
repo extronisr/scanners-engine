@@ -44,7 +44,7 @@ jobs:
                     'biotech_trials.json','market_scanner_universe.json','accuracy_stats.json']
           for name in caches:
               url = base + '?key=' + urllib.parse.quote('cache:' + name)
-              req = urllib.request.Request(url, headers={'x-publish-key': key})
+              req = urllib.request.Request(url, headers={'x-publish-key': key, 'User-Agent': 'scanner-refresh/1.0'})
               try:
                   with urllib.request.urlopen(req, timeout=30) as r:
                       data = r.read()
@@ -83,7 +83,8 @@ jobs:
               url = base + '?key=' + urllib.parse.quote(k)
               req = urllib.request.Request(url, data=data, method='POST',
                                            headers={'x-publish-key': key,
-                                                    'Content-Type': 'application/octet-stream'})
+                                                    'Content-Type': 'application/octet-stream',
+                                                    'User-Agent': 'scanner-refresh/1.0'})
               with urllib.request.urlopen(req, timeout=60) as r:
                   if r.status != 200:
                       raise SystemExit('publish failed for ' + k + ': HTTP ' + str(r.status))
