@@ -320,8 +320,10 @@ def download_all(tickers):
         df = None
         for attempt in range(3):
             try:
-                df = yf.download(chunk, period="1y", interval="1d", group_by="ticker",
-                                 auto_adjust=False, threads=True, progress=False)
+                import contextlib, io as _io
+                with contextlib.redirect_stdout(_io.StringIO()), contextlib.redirect_stderr(_io.StringIO()):
+                    df = yf.download(chunk, period="1y", interval="1d", group_by="ticker",
+                                     auto_adjust=False, threads=True, progress=False)
                 break
             except Exception:
                 time.sleep(5 * (attempt + 1))
