@@ -584,6 +584,11 @@ def fda_gov_source_for(ticker, bt):
     return None
 
 
+# 8-K items that are substantive events even though the site's own material list (BIO_MATERIAL_ITEMS) omits them:
+# bankruptcy 1.03, completed acquisition/disposition 2.01, delisting notice 3.01, non-reliance on financials 4.02,
+# change in control 5.01. Used only to decide that a FRESH filing represents a ticker over an OLD headline
+# (not for corroboration, scoring or display). Routine items (2.02 results, 5.02 officer changes, 5.03 bylaws, 9.01) are left out.
+BIO_FRESH_FILING_ITEMS = BIO_MATERIAL_ITEMS | {"1.03", "2.01", "3.01", "4.02", "5.01"}
 BIO_FRESH_SEC = 48 * 3600   # a card older than this does not represent a ticker that has a fresh material filing
 
 
@@ -612,8 +617,10 @@ def _bio_rep(group, now):
         return max(xs, key=lambda g: _card_time(g) or 0) if xs else None
     ev = newest([g for g in group if _event_news(g)])
     sec = newest([g for g in group if g["kind"] == "sec" and _sec_items(g) & BIO_MATERIAL_ITEMS])
-    if ev is not None and sec is not None and not _card_fresh(ev, now) and _card_fresh(sec, now):
-        return sec
+    fresh_sec = newest([g for g in group if g["kind"] == "sec" and _sec_items(g) & BIO_FRESH_FILING_ITEMS
+                        and _card_fresh(g, now)])
+    if fresh_sec is not None and (ev is None and sec is None or ev is not None and not _card_fresh(ev, now)):
+        return fresh_sec
     return (ev or sec
             or next((g for g in group if g["kind"] == "news"), None)
             or max(group, key=lambda g: sev_rank.get(g["sev"], 0)))

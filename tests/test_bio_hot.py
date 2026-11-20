@@ -178,3 +178,25 @@ def test_rep_picks_newest_of_several_event_headlines():
     a = _news("Tkr announces pricing of public offering", 3)
     b = _news("Tkr announces closing of public offering", 0.2)
     assert _rep_for(a, b) is b
+
+
+def test_rep_fresh_delisting_or_acquisition_filing_beats_old_headline_but_routine_items_do_not():
+    old = _news("Tkr announces pricing of public offering", 4)
+    for items in ("3.01", "2.01", "1.03", "4.02", "5.01"):
+        f = _sec(items, 0.2)
+        assert _rep_for(old, f) is f, items
+    for items in ("5.02", "2.02", "5.03", "9.01"):
+        assert _rep_for(old, _sec(items, 0.2)) is old, items
+
+
+def test_rep_fresh_headline_still_beats_delisting_filing_and_stale_filing_never_wins():
+    fresh_news = _news("Tkr announces pricing of public offering", 0.3)
+    assert _rep_for(fresh_news, _sec("3.01", 0.1)) is fresh_news
+    old = _news("Tkr announces pricing of public offering", 4)
+    assert _rep_for(old, _sec("3.01", 5)) is old
+
+
+def test_rep_fresh_delisting_filing_beats_generic_news_and_price_when_no_event_headline():
+    generic = _alert("info", "news", "TKR", "Tkr Balance Sheet - TradingView", ts=NOW - 2 * DAY)
+    f = _sec("3.01", 0.2)
+    assert _rep_for(generic, f) is f
