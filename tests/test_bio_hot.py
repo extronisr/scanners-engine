@@ -109,3 +109,72 @@ def test_bio_pane_hot_section_renders_once_and_dedups(monkeypatch):
     assert bio.count("PMN: ירידה חדה -70.1%") == 1   # price-only: in the feed, not hot
     # non-hot alert still in the feed
     assert "REGN stock gains on Q3 beat" in bio
+
+
+# ---- representative card: an old headline must neither misrepresent nor hide a fresh material filing ----
+NOW = 1_800_000_000.0
+DAY = 86400.0
+
+
+def _rep_for(*cards):
+    # a critical price move corroborates a lone news/filing card so the ticker is hot
+    corro = _alert("crit", "price", "TKR", "TKR: ירידה חדה -30.1%", ts=NOW)
+    hot = g.select_bio_hot(list(cards) + [corro], None, n=5, now=NOW)
+    assert len(hot) == 1
+    return hot[0]
+
+
+def _news(head, age_days, kind="news"):
+    return _alert("info", kind, "TKR", head, ts=NOW - age_days * DAY)
+
+
+def _sec(items, age_days):
+    # EDGAR filing dates are midnight UTC of the filing day
+    return _alert("warn", "sec", "TKR", f"TKR: דיווח 8-K חדש · סעיפים {items}",
+                  ts=NOW - age_days * DAY)
+
+
+def test_rep_old_event_news_does_not_hide_fresh_material_filing():
+    old = _news("Tkr announces pricing of public offering", 4)
+    fresh = _sec("1.01,9.01", 0.2)
+    assert _rep_for(old, fresh) is fresh
+
+
+def test_rep_fresh_news_is_not_replaced_by_a_filing():
+    news = _news("Tkr announces pricing of public offering", 0.3)
+    sec = _sec("1.01,9.01", 0.1)
+    assert _rep_for(sec, news) is news
+
+
+def test_rep_generic_filing_never_replaces_news():
+    old = _news("Tkr announces pricing of public offering", 4)
+    generic = _sec("5.02", 0.1)              # not a declared-material item
+    price = _alert("crit", "price", "TKR", "TKR: ירידה חדה -30.1%", ts=NOW)
+    assert _rep_for(old, generic, price) is old
+
+
+def test_rep_old_filing_does_not_replace_news():
+    news = _news("Tkr announces pricing of public offering", 0.5)
+    old_sec = _sec("1.01", 6)
+    assert _rep_for(old_sec, news) is news
+
+
+def test_rep_both_old_keeps_previous_preference_and_unknown_time_counts_as_fresh():
+    news = _news("Tkr announces pricing of public offering", 5)
+    sec = _sec("1.01", 4)
+    assert _rep_for(news, sec) is news       # both stale: unchanged behaviour
+    undated = _alert("info", "news", "TKR", "Tkr announces pricing of public offering", ts=None)
+    assert _rep_for(undated, _sec("1.01", 0.1)) is undated
+
+
+def test_rep_filing_date_counts_to_end_of_day():
+    # filed "today" (midnight UTC of the filing day is 20h ago) is fresh; filed 3.1 days ago (more than 48h after its end of day) is not
+    old = _news("Tkr announces pricing of public offering", 4)
+    assert _rep_for(old, _sec("8.01", 20 / 24)) is not old
+    assert _rep_for(old, _sec("8.01", 3.1)) is old
+
+
+def test_rep_picks_newest_of_several_event_headlines():
+    a = _news("Tkr announces pricing of public offering", 3)
+    b = _news("Tkr announces closing of public offering", 0.2)
+    assert _rep_for(a, b) is b

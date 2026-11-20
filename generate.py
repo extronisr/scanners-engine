@@ -584,7 +584,42 @@ def fda_gov_source_for(ticker, bt):
     return None
 
 
-def select_bio_hot(alerts, bt, n=5):
+BIO_FRESH_SEC = 48 * 3600   # a card older than this does not represent a ticker that has a fresh material filing
+
+
+def _card_time(a):
+    """When a card's event happened (epoch). An EDGAR filing date has no time of day, so it
+    counts to the end of that day. None when unknown (treated as fresh, never as stale)."""
+    ts = a.get("ts")
+    if not ts:
+        return None
+    return ts + 86400 if a.get("kind") == "sec" else ts
+
+
+def _card_fresh(a, now):
+    t = _card_time(a)
+    return t is None or now - t <= BIO_FRESH_SEC
+
+
+def _bio_rep(group, now):
+    """One card per hot ticker. Substance first: an event headline, else a material 8-K, else any
+    news, else the strongest card. The one exception: when the event headline is old and a
+    material 8-K is fresh, the old headline would misrepresent the ticker (and hide the new
+    filing), so the fresh filing represents it. A generic (non-material) filing never replaces news,
+    and a fresh headline is never replaced by a filing."""
+    sev_rank = {"crit": 3, "warn": 2, "info": 1}
+    def newest(xs):
+        return max(xs, key=lambda g: _card_time(g) or 0) if xs else None
+    ev = newest([g for g in group if _event_news(g)])
+    sec = newest([g for g in group if g["kind"] == "sec" and _sec_items(g) & BIO_MATERIAL_ITEMS])
+    if ev is not None and sec is not None and not _card_fresh(ev, now) and _card_fresh(sec, now):
+        return sec
+    return (ev or sec
+            or next((g for g in group if g["kind"] == "news"), None)
+            or max(group, key=lambda g: sev_rank.get(g["sev"], 0)))
+
+
+def select_bio_hot(alerts, bt, n=5, now=None):
     """Hottest biotech alerts: corroborated material events first.
 
     A ticker is hot when several EXISTING signal types point at it (price
@@ -616,11 +651,7 @@ def select_bio_hot(alerts, bt, n=5):
     scored.sort(key=lambda x: x[0], reverse=True)
     out = []
     for _score, t, group in scored[:n]:
-        rep = (next((g for g in group if _event_news(g)), None)
-               or next((g for g in group if g["kind"] == "sec" and _sec_items(g) & BIO_MATERIAL_ITEMS), None)
-               or next((g for g in group if g["kind"] == "news"), None)
-               or max(group, key=lambda g: sev_rank.get(g["sev"], 0)))
-        out.append(rep)
+        out.append(_bio_rep(group, time.time() if now is None else now))
     return out
 
 
