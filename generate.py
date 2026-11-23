@@ -733,6 +733,9 @@ def biotech_alerts():
         if closes and len(closes) >= 22:
             series[t] = (closes, vols, last_d)
             print("BIOTECH single-fetch recovered: " + t)
+        else:
+            print("BIOTECH single-fetch not recovered: " + t + " bars=" + str(len(closes) if closes else 0)
+                  + " last=" + str(last_d))
         time.sleep(0.15)
     stats["biotech_missing"] = len(tickers) - len(series)
     _bio_miss = sorted(set(tickers) - set(series))
@@ -1573,6 +1576,9 @@ def _bt_fda_items(errors):
     try:
         items = _bt_openfda_items()
         if items:
+            _nw = max(x["pub_ts"] for x in items)
+            print("FDA openFDA fallback items: " + str(len(items)) + " newest="
+                  + datetime.fromtimestamp(_nw, tz=timezone.utc).date().isoformat())
             return items
         raise RuntimeError("openFDA returned no items")
     except Exception as e:
