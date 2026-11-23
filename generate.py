@@ -726,6 +726,14 @@ def biotech_alerts():
         if closes:
             series[t] = (closes, vols, last_d)
         time.sleep(0.15)
+    # bounded retry for any other name the batch download dropped (a transient batch gap, not a
+    # coverage change): same >=22 bar rule as the batch path, at most 25 single fetches per run
+    for t in sorted(set(tickers) - set(series) - wl_tickers)[:25]:
+        closes, vols, last_d, _adj = chart_closes_volumes(t)
+        if closes and len(closes) >= 22:
+            series[t] = (closes, vols, last_d)
+            print("BIOTECH single-fetch recovered: " + t)
+        time.sleep(0.15)
     stats["biotech_missing"] = len(tickers) - len(series)
     _bio_miss = sorted(set(tickers) - set(series))
     if _bio_miss:
