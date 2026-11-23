@@ -456,9 +456,12 @@ def _bio_download(tickers):
 
 
 # ---------------------------------------------------------------- biotech
-def chart_closes_volumes(symbol, range_value="3mo"):
+_CHART_DBG = {}
+
+
+def chart_closes_volumes(symbol, range_value="3mo", host="query1"):
     encoded = urllib.parse.quote(symbol, safe="")
-    url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}"
+    url = (f"https://{host}.finance.yahoo.com/v8/finance/chart/{encoded}"
            f"?range={range_value}&interval=1d&events=history")
     try:
         data = http_get_json(url)
@@ -468,6 +471,7 @@ def chart_closes_volumes(symbol, range_value="3mo"):
         # a null close drops the WHOLE bar - close and volume stay paired
         ts = result.get("timestamp") or []
         raw_c = q.get("close") or []
+        _CHART_DBG[(symbol, host)] = (len(ts), len(raw_c), sum(1 for x in raw_c if x is not None))
         pad = len(raw_c) - len(ts)
         adj_pad = len(raw_c) - len(adj_raw)
         pairs = [(c, v, t, a) for c, v, t, a in
@@ -735,7 +739,15 @@ def biotech_alerts():
             print("BIOTECH single-fetch recovered: " + t)
         else:
             print("BIOTECH single-fetch not recovered: " + t + " bars=" + str(len(closes) if closes else 0)
-                  + " last=" + str(last_d))
+                  + " last=" + str(last_d) + " raw(ts,close,nonnull)=" + str(_CHART_DBG.get((t, "query1"))))
+            # a different Yahoo edge host sometimes serves the full history the first one trims
+            closes2, vols2, last_d2, _adj2 = chart_closes_volumes(t, host="query2")
+            if closes2 and len(closes2) >= 22:
+                series[t] = (closes2, vols2, last_d2)
+                print("BIOTECH query2 recovered: " + t)
+            else:
+                print("BIOTECH query2 not recovered: " + t + " bars=" + str(len(closes2) if closes2 else 0)
+                      + " raw=" + str(_CHART_DBG.get((t, "query2"))))
         time.sleep(0.15)
     stats["biotech_missing"] = len(tickers) - len(series)
     _bio_miss = sorted(set(tickers) - set(series))
