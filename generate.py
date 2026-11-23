@@ -748,6 +748,13 @@ def biotech_alerts():
             else:
                 print("BIOTECH query2 not recovered: " + t + " bars=" + str(len(closes2) if closes2 else 0)
                       + " raw=" + str(_CHART_DBG.get((t, "query2"))))
+                # last try: a longer range, trimmed to the same ~3-month window (65 bars)
+                closes3, vols3, last_d3, _adj3 = chart_closes_volumes(t, range_value="1y")
+                if closes3 and len(closes3) >= 22:
+                    series[t] = (closes3[-65:], vols3[-65:], last_d3)
+                    print("BIOTECH 1y-range recovered: " + t)
+                else:
+                    print("BIOTECH 1y-range not recovered: " + t + " raw=" + str(_CHART_DBG.get((t, "query1"))))
         time.sleep(0.15)
     stats["biotech_missing"] = len(tickers) - len(series)
     _bio_miss = sorted(set(tickers) - set(series))
