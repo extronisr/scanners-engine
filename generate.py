@@ -727,6 +727,9 @@ def biotech_alerts():
             series[t] = (closes, vols, last_d)
         time.sleep(0.15)
     stats["biotech_missing"] = len(tickers) - len(series)
+    _bio_miss = sorted(set(tickers) - set(series))
+    if _bio_miss:
+        print("BIOTECH no-price symbols (" + str(len(_bio_miss)) + "): " + ",".join(_bio_miss[:40]))
 
     vfrac_now = _dip_vfrac()
     today = datetime.now(timezone.utc).date().isoformat()
@@ -2991,6 +2994,13 @@ def main():
         print("FAILURES: " + str(len(failures)) + " section(s)")
         for sec, det in failures[:20]:
             print(f"  [{sec}] (detail redacted)")
+        # diagnostic only: failure class counts from the text before the first colon (symbol/CIK, no exception text)
+        _cls = {}
+        for sec, det in failures:
+            k = sec + ": " + str(det).split(":")[0][:48]
+            _cls[k] = _cls.get(k, 0) + 1
+        for k, v in sorted(_cls.items(), key=lambda kv: -kv[1])[:25]:
+            print(f"  failure-class {k} x{v}")
 
 
 if __name__ == "__main__":
